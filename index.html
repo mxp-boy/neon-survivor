@@ -12,7 +12,14 @@
     background: #05010a;
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   }
-  #gameCanvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  /* 游戏容器：触屏强制横屏时整体旋转缩放铺满，桌面端恒等于视口 */
+  #gameWrap {
+    position: absolute; left: 50%; top: 50%; overflow: hidden;
+    transform: translate(-50%, -50%);
+    transform-origin: center center;
+    will-change: transform;
+  }
+  #gameCanvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 
   /* 霓虹标题 */
   .glitch-title {
@@ -49,7 +56,7 @@
 
   /* 菜单与 HUD 通用面板 */
   .panel {
-    position: absolute; left: 50%; transform: translateX(-50%);
+    position: absolute; left: 50%; top: 46%; transform: translateX(-50%);
     text-align: center; z-index: 10;
   }
   .btn {
@@ -119,30 +126,10 @@
   #joyThumb { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(0,255,255,.55); box-shadow: 0 0 18px rgba(0,255,255,.8); }
   #dashBtn { position: fixed; z-index: 15; right: 26px; bottom: 34px; width: 84px; height: 84px; border-radius: 50%; border: 2px solid #ff0; color: #ff0; font-size: 15px; font-weight: 700; text-shadow: 0 0 8px #ff0; background: rgba(255,255,0,.1); display: flex; align-items: center; justify-content: center; text-align: center; letter-spacing: .08em; touch-action: none; user-select: none; -webkit-user-select: none; }
   #dashBtn:active { background: rgba(255,255,0,.35); }
-
-  /* 强制横屏提示层：竖屏时全屏遮挡，拦截交互 */
-  #rotateHint {
-    position: fixed; inset: 0; z-index: 100; display: none;
-    flex-direction: column; align-items: center; justify-content: center;
-    background: radial-gradient(circle at 50% 40%, rgba(10,2,30,.96), rgba(2,0,10,.98));
-    color: #0ff; letter-spacing: .18em;
-  }
-  #rotateHint .rotate-icon {
-    font-size: 76px; color: #ff0; text-shadow: 0 0 22px #ff0;
-    animation: rotateHintAnim 1.8s ease-in-out infinite;
-  }
-  #rotateHint .rotate-text {
-    margin-top: 28px; font-size: 24px; font-weight: 700; text-shadow: 0 0 14px #0ff;
-  }
-  #rotateHint .rotate-sub { margin-top: 12px; font-size: 14px; color: #8cf; text-shadow: 0 0 8px #08f; }
-  @keyframes rotateHintAnim {
-    0%   { transform: rotate(0deg); }
-    55%  { transform: rotate(90deg); }
-    100% { transform: rotate(90deg); }
-  }
 </style>
 </head>
 <body>
+<div id="gameWrap">
 <canvas id="gameCanvas"></canvas>
 
 <div id="hud">
@@ -165,7 +152,7 @@
 <div id="overlay">
   <div class="glitch-title" data-text="NEON SURVIVOR">NEON SURVIVOR</div>
   <div class="subtitle">霓 虹 生 存 者</div>
-  <div class="panel" style="top: 46vh;">
+  <div class="panel" style="top: 46%;">
     <div>
       <button class="btn" id="startBtn">开 始 游 戏</button>
       <button class="btn btn-magenta" id="restartBtn" style="display:none;">再 来 一 局</button>
@@ -202,17 +189,12 @@
 <!-- 触屏控制：虚拟摇杆 + 冲刺按钮 -->
 <div id="joyBase" style="display:none;"><div id="joyThumb"></div></div>
 <div id="dashBtn" style="display:none;">冲刺<br>DASH</div>
-
-<!-- 强制横屏提示层（触屏竖屏时显示） -->
-<div id="rotateHint">
-  <div class="rotate-icon">⟳</div>
-  <div class="rotate-text">请旋转手机横屏游玩</div>
-  <div class="rotate-sub">横屏后自动开始</div>
-</div>
+</div><!-- /gameWrap -->
 
 <script>
 (() => {
   const canvas = document.getElementById('gameCanvas');
+  const gameWrap = document.getElementById('gameWrap');
   const ctx = canvas.getContext('2d');
   const overlay = document.getElementById('overlay');
   const startBtn = document.getElementById('startBtn');
@@ -240,11 +222,18 @@
   let W = 0, H = 0, DPR = 1;
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth; H = window.innerHeight;
+    if (isTouch) {
+      // 触屏强制横屏：固定逻辑高度 LAND_H，宽度随屏幕比例动态，保证旋转后完整铺满无裁剪
+      applyLandscape();
+      W = landW; H = LAND_H;
+    } else {
+      gameWrap.style.width = (W = window.innerWidth) + 'px';
+      gameWrap.style.height = (H = window.innerHeight) + 'px';
+      gameWrap.style.transform = 'translate(-50%,-50%)';
+    }
     canvas.width = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    if (isTouch) updateRotateHint(); // 触屏：窗口尺寸变化时同步横屏提示层状态
   }
   window.addEventListener('resize', resize);
 
@@ -762,24 +751,32 @@
   let joyActive = false, joyId = -1, joyDx = 0, joyDy = 0;
   // 动态摇杆：基底中心 = 手指落点（joyOx/joyOy），摇杆跟手移动
   let joyOx = 0, joyOy = 0;
-  // 强制横屏：竖屏时暂停渲染并显示全屏提示层拦截交互
-  // 横屏判定：宽>高 或 matchMedia 方向匹配（部分机型 innerWidth 更新滞后，双条件兜底）
-  const isLandscape = () =>
-    window.innerWidth > window.innerHeight ||
-    (window.matchMedia && window.matchMedia('(orientation: landscape)').matches);
-  const rotateHint = document.getElementById('rotateHint');
-  let rotateHintShown = null;
-  function updateRotateHint() {
-    if (!rotateHint) return;
-    const show = isTouch && !isLandscape();
-    // 状态未变化时不重复赋值，避免每帧触发样式重算
-    if (rotateHintShown === show) return;
-    rotateHintShown = show;
-    rotateHint.style.display = show ? 'flex' : 'none';
+  // 强制横屏：逻辑高度固定 LAND_H，宽度 landW 随屏幕比例动态（竖屏 rotate90 铺满，横屏不旋转）
+  const LAND_H = 540;
+  let landW = 960, landScale = 1, landRotate = 0;
+  function applyLandscape() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const portrait = vw < vh;
+    const minD = portrait ? vw : vh;
+    const maxD = portrait ? vh : vw;
+    landW = Math.max(320, Math.round(maxD * LAND_H / minD));
+    landScale = minD / LAND_H;
+    landRotate = portrait ? 90 : 0;
+    gameWrap.style.width = landW + 'px';
+    gameWrap.style.height = LAND_H + 'px';
+    gameWrap.style.transform = 'translate(-50%,-50%) rotate(' + landRotate + 'deg) scale(' + landScale + ')';
+  }
+  // 视口坐标 → wrap 逻辑坐标（对 wrap 旋转/缩放做逆变换），摇杆与命中区域使用
+  function screenToGame(cx, cy) {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = (cx - vw / 2) / landScale;
+    let y = (cy - vh / 2) / landScale;
+    if (landRotate === 90) { const tmp = x; x = y; y = -tmp; }
+    return { x: x + landW / 2, y: y + LAND_H / 2 };
   }
   if (isTouch) {
     dashBtn.style.display = 'flex';
-    updateRotateHint();
+    applyLandscape();
     // DOM 渲染元素同步缩放（连击文字等）
     comboTip.style.fontSize = Math.round(20 * touchScale) + 'px';
     // 触屏禁用页面滚动/橡皮筋回弹（音乐库列表除外，保留纵向滚动）
@@ -787,24 +784,21 @@
       if (e.target.closest('.song-list')) return;
       e.preventDefault();
     }, { passive: false });
-    // 屏幕方向变化时刷新横屏提示层
-    window.addEventListener('orientationchange', () => setTimeout(updateRotateHint, 250));
-    window.addEventListener('resize', updateRotateHint);
-    // 页面回到前台时兜底刷新（部分 WebView 旋转后从后台恢复才更新尺寸）
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) updateRotateHint();
-    });
+    // 屏幕方向/前后台变化时重新计算强制横屏布局（防部分机型旋转事件缺失）
+    window.addEventListener('orientationchange', () => setTimeout(resize, 250));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) resize(); });
     window.addEventListener('touchstart', e => {
       if (e.target.closest('button, input, .song-item, #songPanel')) return;
       for (const t of e.changedTouches) {
-        if (t.clientX < window.innerWidth * 0.55 && !joyActive) {
+        const g = screenToGame(t.clientX, t.clientY);
+        if (g.x < landW * 0.55 && !joyActive) {
           joyActive = true; joyId = t.identifier;
           joyDx = 0; joyDy = 0;
-          // 摇杆基底出现在触摸点，跟手移动
-          joyOx = t.clientX; joyOy = t.clientY;
+          // 摇杆基底出现在触摸点（wrap 逻辑坐标，随旋转/缩放正确显示），跟手移动
+          joyOx = g.x; joyOy = g.y;
           joyBase.style.display = 'block';
-          joyBase.style.left = joyOx + 'px';
-          joyBase.style.top = joyOy + 'px';
+          joyBase.style.left = g.x + 'px';
+          joyBase.style.top = g.y + 'px';
           joyThumb.style.transform = 'translate(0,0)';
         }
       }
@@ -813,7 +807,8 @@
       for (const t of e.changedTouches) {
         if (joyActive && t.identifier === joyId) {
           // 相对手指落点中心计算方向与力度，基底不移动（摇杆跟手）
-          let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
+          const g = screenToGame(t.clientX, t.clientY);
+          let dx = g.x - joyOx, dy = g.y - joyOy;
           const maxR = 52;
           const len = Math.hypot(dx, dy);
           if (len > maxR) { dx = dx / len * maxR; dy = dy / len * maxR; }
@@ -863,12 +858,6 @@
     requestAnimationFrame(loop);
     const dt = Math.min((now - last) / 1000, 0.033);
     last = now;
-
-    // 每帧兜底刷新横屏提示层（真机部分旋转不触发 orientationchange/resize，这里保证状态及时更新；函数含状态缓存，性能开销可忽略）
-    updateRotateHint();
-
-    // 触屏竖屏：暂停渲染与更新，等待横屏后自动恢复（提示层同时拦截交互）
-    if (isTouch && !isLandscape()) return;
 
     drawBackground(dt, now);
     if (state === 'playing') update(dt);
