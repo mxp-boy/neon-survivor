@@ -8,10 +8,11 @@
   * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
   html, body {
     width: 100%; height: 100%; overflow: hidden;
+    touch-action: none;               /* 触屏禁默认滚动/橡皮筋回弹 */
     background: #05010a;
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
   }
-  #gameCanvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #gameCanvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
 
   /* 霓虹标题 */
   .glitch-title {
@@ -106,7 +107,7 @@
   .song-search input { width: 100%; box-sizing: border-box; background: rgba(0,0,0,.5); border: 1px solid rgba(0,255,255,.3); color: #fff; padding: 9px 12px; border-radius: 8px; font-size: 14px; outline: none; }
   .song-search input:focus { border-color: #0ff; box-shadow: 0 0 10px rgba(0,255,255,.3); }
   .song-status { padding: 6px 18px 2px; color: #8cf; font-size: 13px; min-height: 20px; }
-  .song-list { flex: 1; overflow-y: auto; padding: 8px 12px 16px; }
+  .song-list { flex: 1; overflow-y: auto; padding: 8px 12px 16px; touch-action: pan-y; }
   .song-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; margin: 4px 0; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: #ddd; font-size: 15px; cursor: pointer; background: rgba(255,255,255,.03); transition: all .15s; }
   .song-item:hover { border-color: #0ff; background: rgba(0,255,255,.08); color: #fff; }
   .song-item .tag { font-size: 11px; color: #0f0; border: 1px solid #0f0; border-radius: 10px; padding: 2px 8px; opacity: .8; }
@@ -118,6 +119,27 @@
   #joyThumb { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(0,255,255,.55); box-shadow: 0 0 18px rgba(0,255,255,.8); }
   #dashBtn { position: fixed; z-index: 15; right: 26px; bottom: 34px; width: 84px; height: 84px; border-radius: 50%; border: 2px solid #ff0; color: #ff0; font-size: 15px; font-weight: 700; text-shadow: 0 0 8px #ff0; background: rgba(255,255,0,.1); display: flex; align-items: center; justify-content: center; text-align: center; letter-spacing: .08em; touch-action: none; user-select: none; -webkit-user-select: none; }
   #dashBtn:active { background: rgba(255,255,0,.35); }
+
+  /* 强制横屏提示层：竖屏时全屏遮挡，拦截交互 */
+  #rotateHint {
+    position: fixed; inset: 0; z-index: 100; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, rgba(10,2,30,.96), rgba(2,0,10,.98));
+    color: #0ff; letter-spacing: .18em;
+  }
+  #rotateHint .rotate-icon {
+    font-size: 76px; color: #ff0; text-shadow: 0 0 22px #ff0;
+    animation: rotateHintAnim 1.8s ease-in-out infinite;
+  }
+  #rotateHint .rotate-text {
+    margin-top: 28px; font-size: 24px; font-weight: 700; text-shadow: 0 0 14px #0ff;
+  }
+  #rotateHint .rotate-sub { margin-top: 12px; font-size: 14px; color: #8cf; text-shadow: 0 0 8px #08f; }
+  @keyframes rotateHintAnim {
+    0%   { transform: rotate(0deg); }
+    55%  { transform: rotate(90deg); }
+    100% { transform: rotate(90deg); }
+  }
 </style>
 </head>
 <body>
@@ -181,6 +203,13 @@
 <div id="joyBase" style="display:none;"><div id="joyThumb"></div></div>
 <div id="dashBtn" style="display:none;">冲刺<br>DASH</div>
 
+<!-- 强制横屏提示层（触屏竖屏时显示） -->
+<div id="rotateHint">
+  <div class="rotate-icon">⟳</div>
+  <div class="rotate-text">请旋转手机横屏游玩</div>
+  <div class="rotate-sub">横屏后自动开始</div>
+</div>
+
 <script>
 (() => {
   const canvas = document.getElementById('gameCanvas');
@@ -215,7 +244,7 @@
     canvas.width = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    if (isTouch) layoutJoy(); // 触屏固定摇杆中心随窗口尺寸同步更新
+    if (isTouch) updateRotateHint(); // 触屏：窗口尺寸变化时同步横屏提示层状态
   }
   window.addEventListener('resize', resize);
 
@@ -718,34 +747,45 @@
   startBtn.addEventListener('click', startGame);
   restartBtn.addEventListener('click', startGame);
 
-  // ---------- 触屏控制（手机/平板：左半屏固定虚拟摇杆 + 右下角冲刺） ----------
+  // ---------- 触屏控制（手机/平板：左半屏跟随手指虚拟摇杆 + 右下角冲刺） ----------
   const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   // 触屏模式统一缩放系数：所有游戏物体缩小约 28%（0.72），键盘/桌面模式保持 1 不变
   const touchScale = isTouch ? 0.72 : 1;
   const FONT_UI = 'bold ' + Math.round(22 * touchScale) + 'px "Segoe UI", sans-serif';
   let joyActive = false, joyId = -1, joyDx = 0, joyDy = 0;
-  // 固定摇杆基底中心（左半屏中下部，不随手指移动）
-  let joyCX = 0, joyCY = 0;
-  function layoutJoy() {
-    joyCX = window.innerWidth * 0.22;
-    joyCY = window.innerHeight * 0.7;
+  // 动态摇杆：基底中心 = 手指落点（joyOx/joyOy），摇杆跟手移动
+  let joyOx = 0, joyOy = 0;
+  // 强制横屏：竖屏时暂停渲染并显示全屏提示层拦截交互
+  const isLandscape = () => window.innerWidth > window.innerHeight;
+  const rotateHint = document.getElementById('rotateHint');
+  function updateRotateHint() {
+    if (!rotateHint) return;
+    rotateHint.style.display = (isTouch && !isLandscape()) ? 'flex' : 'none';
   }
   if (isTouch) {
-    layoutJoy();
     dashBtn.style.display = 'flex';
+    updateRotateHint();
     // DOM 渲染元素同步缩放（连击文字等）
     comboTip.style.fontSize = Math.round(20 * touchScale) + 'px';
+    // 触屏禁用页面滚动/橡皮筋回弹（音乐库列表除外，保留纵向滚动）
+    document.addEventListener('touchmove', e => {
+      if (e.target.closest('.song-list')) return;
+      e.preventDefault();
+    }, { passive: false });
+    // 屏幕方向变化时刷新横屏提示层
+    window.addEventListener('orientationchange', () => setTimeout(updateRotateHint, 250));
+    window.addEventListener('resize', updateRotateHint);
     window.addEventListener('touchstart', e => {
       if (e.target.closest('button, input, .song-item, #songPanel')) return;
       for (const t of e.changedTouches) {
         if (t.clientX < window.innerWidth * 0.55 && !joyActive) {
-          layoutJoy();
           joyActive = true; joyId = t.identifier;
           joyDx = 0; joyDy = 0;
-          // 摇杆基底固定在左半屏中下部，不跟随触摸点出现
+          // 摇杆基底出现在触摸点，跟手移动
+          joyOx = t.clientX; joyOy = t.clientY;
           joyBase.style.display = 'block';
-          joyBase.style.left = joyCX + 'px';
-          joyBase.style.top = joyCY + 'px';
+          joyBase.style.left = joyOx + 'px';
+          joyBase.style.top = joyOy + 'px';
           joyThumb.style.transform = 'translate(0,0)';
         }
       }
@@ -753,8 +793,8 @@
     window.addEventListener('touchmove', e => {
       for (const t of e.changedTouches) {
         if (joyActive && t.identifier === joyId) {
-          // 相对固定中心计算方向与力度，基底不移动
-          let dx = t.clientX - joyCX, dy = t.clientY - joyCY;
+          // 相对手指落点中心计算方向与力度，基底不移动（摇杆跟手）
+          let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
           const maxR = 52;
           const len = Math.hypot(dx, dy);
           if (len > maxR) { dx = dx / len * maxR; dy = dy / len * maxR; }
@@ -804,6 +844,9 @@
     requestAnimationFrame(loop);
     const dt = Math.min((now - last) / 1000, 0.033);
     last = now;
+
+    // 触屏竖屏：暂停渲染与更新，等待横屏后自动恢复（提示层同时拦截交互）
+    if (isTouch && !isLandscape()) return;
 
     drawBackground(dt, now);
     if (state === 'playing') update(dt);
