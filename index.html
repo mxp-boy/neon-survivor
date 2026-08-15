@@ -215,6 +215,7 @@
     canvas.width = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (isTouch) layoutJoy(); // 触屏固定摇杆中心随窗口尺寸同步更新
   }
   window.addEventListener('resize', resize);
 
@@ -270,7 +271,6 @@
   let lyricPulse = 0;          // 歌词段脉冲特效强度
   let bgGrad = null;           // 背景渐变缓存（性能优化）
   let playerGlow = null;       // 玩家光晕渐变缓存（性能优化）
-  const FONT_UI = 'bold 22px "Segoe UI", sans-serif';
 
   musicBtn.addEventListener('click', () => {
     ensureAudio();
@@ -602,7 +602,7 @@
 
   // ---------- 实体 ----------
   function makePlayer() {
-    return { x: W/2, y: H/2, r: 14, hp: 100, maxHp: 100, angle: -Math.PI/2, trail: [], speed: 320, fireCd: 0 };
+    return { x: W/2, y: H/2, r: 14 * touchScale, hp: 100, maxHp: 100, angle: -Math.PI/2, trail: [], speed: 320, fireCd: 0 };
   }
   function enemyType(waveNum) {
     const r = Math.random();
@@ -620,14 +620,14 @@
       else if (edge === 2) { x = Math.random() * W; y = H + pad; }
       else { x = -pad; y = Math.random() * H; }
       const ang = Math.atan2(H/2 - y, W/2 - x) + (Math.random() - 0.5) * 0.6;
-      const cfg = { r: 18, hp: 2, speed: 120 + wave * 8, color: '#fc0', score: 30, sides: 5 };
+      const cfg = { r: 18 * touchScale, hp: 2, speed: 120 + wave * 8, color: '#fc0', score: 30, sides: 5 };
       return { x, y, vx: Math.cos(ang) * cfg.speed, vy: Math.sin(ang) * cfg.speed, sp: cfg.speed, r: cfg.r, hp: cfg.hp, maxHp: cfg.hp, color: cfg.color, score: cfg.score, sides: cfg.sides, flash: 0, t: Math.random() * 10, lyric: true };
     }
     const t = enemyType(wave);
     const cfg = {
-      normal: { r: 16, hp: 1, speed: 90 + wave * 8, color: '#f33', score: 10, sides: 4 },
-      fast:   { r: 11, hp: 1, speed: 160 + wave * 10, color: '#ff0', score: 20, sides: 3 },
-      tank:   { r: 26, hp: 4, speed: 55 + wave * 5, color: '#c0f', score: 50, sides: 6 }
+      normal: { r: 16 * touchScale, hp: 1, speed: 90 + wave * 8, color: '#f33', score: 10, sides: 4 },
+      fast:   { r: 11 * touchScale, hp: 1, speed: 160 + wave * 10, color: '#ff0', score: 20, sides: 3 },
+      tank:   { r: 26 * touchScale, hp: 4, speed: 55 + wave * 5, color: '#c0f', score: 50, sides: 6 }
     }[t];
     const edge = Math.floor(Math.random() * 4);
     let x, y;
@@ -648,7 +648,7 @@
         x, y,
         vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
         life: 0.5 + Math.random() * 0.7, maxLife: 1.2,
-        r: 1.5 + Math.random() * 3, color
+        r: (1.5 + Math.random() * 3) * touchScale, color
       });
     }
   }
@@ -657,7 +657,7 @@
     if (bullets.length > 160) return; // 性能保护：场上子弹过多时不再发射，防快歌雪崩
     const a = Math.atan2(target.y - player.y, target.x - player.x);
     const spd = heavy ? 720 : 560;
-    const r = heavy ? 7 : 4;
+    const r = (heavy ? 7 : 4) * touchScale;
     bullets.push({
       x: player.x + Math.cos(a) * player.r, y: player.y + Math.sin(a) * player.r,
       vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
@@ -718,21 +718,34 @@
   startBtn.addEventListener('click', startGame);
   restartBtn.addEventListener('click', startGame);
 
-  // ---------- 触屏控制（手机/平板：左半屏虚拟摇杆 + 右下角冲刺） ----------
+  // ---------- 触屏控制（手机/平板：左半屏固定虚拟摇杆 + 右下角冲刺） ----------
   const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-  let joyActive = false, joyId = -1, joyOx = 0, joyOy = 0, joyDx = 0, joyDy = 0;
+  // 触屏模式统一缩放系数：所有游戏物体缩小约 28%（0.72），键盘/桌面模式保持 1 不变
+  const touchScale = isTouch ? 0.72 : 1;
+  const FONT_UI = 'bold ' + Math.round(22 * touchScale) + 'px "Segoe UI", sans-serif';
+  let joyActive = false, joyId = -1, joyDx = 0, joyDy = 0;
+  // 固定摇杆基底中心（左半屏中下部，不随手指移动）
+  let joyCX = 0, joyCY = 0;
+  function layoutJoy() {
+    joyCX = window.innerWidth * 0.22;
+    joyCY = window.innerHeight * 0.7;
+  }
   if (isTouch) {
+    layoutJoy();
     dashBtn.style.display = 'flex';
+    // DOM 渲染元素同步缩放（连击文字等）
+    comboTip.style.fontSize = Math.round(20 * touchScale) + 'px';
     window.addEventListener('touchstart', e => {
       if (e.target.closest('button, input, .song-item, #songPanel')) return;
       for (const t of e.changedTouches) {
         if (t.clientX < window.innerWidth * 0.55 && !joyActive) {
+          layoutJoy();
           joyActive = true; joyId = t.identifier;
-          joyOx = t.clientX; joyOy = t.clientY;
           joyDx = 0; joyDy = 0;
+          // 摇杆基底固定在左半屏中下部，不跟随触摸点出现
           joyBase.style.display = 'block';
-          joyBase.style.left = t.clientX + 'px';
-          joyBase.style.top = t.clientY + 'px';
+          joyBase.style.left = joyCX + 'px';
+          joyBase.style.top = joyCY + 'px';
           joyThumb.style.transform = 'translate(0,0)';
         }
       }
@@ -740,7 +753,8 @@
     window.addEventListener('touchmove', e => {
       for (const t of e.changedTouches) {
         if (joyActive && t.identifier === joyId) {
-          let dx = t.clientX - joyOx, dy = t.clientY - joyOy;
+          // 相对固定中心计算方向与力度，基底不移动
+          let dx = t.clientX - joyCX, dy = t.clientY - joyCY;
           const maxR = 52;
           const len = Math.hypot(dx, dy);
           if (len > maxR) { dx = dx / len * maxR; dy = dy / len * maxR; }
@@ -753,6 +767,7 @@
       for (const t of e.changedTouches) {
         if (joyActive && t.identifier === joyId) {
           joyActive = false; joyId = -1; joyDx = 0; joyDy = 0;
+          joyThumb.style.transform = 'translate(0,0)'; // 摇杆回中
           joyBase.style.display = 'none';
         }
       }
@@ -777,7 +792,7 @@
     // 踩点冲刺奖励：在节拍点附近冲刺额外加分
     if (musicMode && beatTimes.length > 0 && nearestBeatDist(musicTime()) < 0.09) {
       score += 5; updateHUD();
-      addText(player.x, player.y - 34, 'RHYTHM! +5', '#ff0');
+      addText(player.x, player.y - 34 * touchScale, 'RHYTHM! +5', '#ff0');
       sfx.perfect();
     }
     explode(player.x, player.y, '#0ff', 10);
@@ -811,10 +826,10 @@
     if (musicMode && musicSource && beatTimes.length > 0) {
       const t = musicTime();
       const dur = musicBuffer ? musicBuffer.duration : 1;
-      const bw = 4, gap = 3;
+      const bw = 4 * touchScale, gap = 3 * touchScale;
       const totalW = beatTimes.length * (bw + gap) - gap;
       const startX = (W - totalW) / 2;
-      const barY = H - 16;
+      const barY = H - 16 * touchScale;
       const nextIdx = beatIdx % beatTimes.length;
       const upcoming = 14;
       for (let k = 0; k < upcoming; k++) {
@@ -826,7 +841,7 @@
         const x = startX + bi * (bw + gap);
         if (x > W) break;
         ctx.fillStyle = `rgba(255,${Math.floor(200 - ahead*80)},60,${alpha})`;
-        ctx.fillRect(x, barY - (ahead < 0.1 ? 10 : 0), bw, 10);
+        ctx.fillRect(x, barY - (ahead < 0.1 ? 10 * touchScale : 0), bw, 10 * touchScale);
       }
     }
 
@@ -943,13 +958,13 @@
               perfect = true;
               gained += 25;
               beatPulse = 1;
-              addText(e.x, e.y - 34, 'PERFECT!', '#ff0');
+              addText(e.x, e.y - 34 * touchScale, 'PERFECT!', '#ff0');
               sfx.perfect();
             }
             score += gained;
             explode(e.x, e.y, e.color, 26);
-            addText(e.x, e.y - 10, '+' + gained, perfect ? '#ff0' : e.color);
-            if (e.lyric) addText(e.x, e.y - 36, '♪', '#fc0');
+            addText(e.x, e.y - 10 * touchScale, '+' + gained, perfect ? '#ff0' : e.color);
+            if (e.lyric) addText(e.x, e.y - 36 * touchScale, '♪', '#fc0');
             enemies.splice(j, 1);
             sfx.boom();
             shake = Math.min(10, shake + 5);
@@ -1045,9 +1060,10 @@
         const b = enemies[j];
         const dx = a.x - b.x, dy = a.y - b.y;
         const d2 = dx * dx + dy * dy;
-        if (d2 < 900 && d2 > 0.01) { // 接触半径约 30px
+        const pushR = 30 * touchScale; // 接触半径随缩放同步缩小
+        if (d2 < pushR * pushR && d2 > 0.01) {
           const d = Math.sqrt(d2);
-          const push = (30 - d) * 0.5 / d;
+          const push = (pushR - d) * 0.5 / d;
           a.x += dx * push; a.y += dy * push;
           b.x -= dx * push; b.y -= dy * push;
         }
@@ -1084,7 +1100,7 @@
     // 飘字
     for (let i = floatTexts.length - 1; i >= 0; i--) {
       const t = floatTexts[i];
-      t.y -= 40 * dt; t.life -= dt;
+      t.y -= 40 * touchScale * dt; t.life -= dt;
       if (t.life <= 0) floatTexts.splice(i, 1);
     }
     if (shake > 0) shake *= 0.9;
@@ -1150,7 +1166,7 @@
       ctx.rotate(e.t * 2);
       ctx.shadowColor = e.color; ctx.shadowBlur = dense ? 3 : 8;
       ctx.strokeStyle = e.flash > 0 ? '#fff' : e.color;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.5 * touchScale;
       ctx.beginPath();
       if (e.lyric) {
         // 歌词怪：画音符 ♪（双圈 + 旗杆）
@@ -1203,7 +1219,7 @@
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(0, -player.r*0.4, 3.5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, -player.r*0.4, 3.5 * touchScale, 0, Math.PI*2); ctx.fill();
       ctx.restore();
     }
 
